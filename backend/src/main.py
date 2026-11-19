@@ -11,7 +11,7 @@ from .schemas import *
 from .common import lock,inventory_lock,pack,add,audit
 from .auth import current,writer,supervisor,verify,token
 from .middleware import Trace,Burst
-from . import pack_service as packs,circulation_service as circulation
+from . import pack_service as packs,circulation_service as circulation,analysis_service as analysis,worker
 q=redis.Redis.from_url(os.environ['REDIS_URL'],decode_responses=True)
 @asynccontextmanager
 async def lifespan(app):
@@ -35,7 +35,9 @@ def login(d:Login,s=Depends(session)):
 def me(u=Depends(current)):return {'email':u.email,'role':u.role}
 @app.get('/archive')
 def archive(s=Depends(session),u=Depends(current)):
-    return {m.__tablename__:[pack(x)for x in s.scalars(select(m).order_by(m.id))]for m in (Edition,Compatibility,Classroom,Student,Copy,Inspection,Pack,PackLine,Assignment,Purchase,Account,DepositEntry)}
+    data={m.__tablename__:[pack(x)for x in s.scalars(select(m).order_by(m.id))]for m in (Edition,Compatibility,Classroom,Student,Copy,Inspection,Pack,PackLine,Assignment,Purchase,Account,DepositEntry)}
+    data['analysis_runs']=[analysis.view(x)for x in s.scalars(select(AnalysisRun).order_by(AnalysisRun.id))]
+    return data
 @app.get('/audits')
 def audits(s=Depends(session),u=Depends(current)):return [pack(x)for x in s.scalars(select(Audit).order_by(Audit.id.desc()).limit(50))]
 @app.post('/editions')
@@ -74,12 +76,18 @@ def pack_new(d:PackInput,s=Depends(session),u=Depends(writer)):
     x=packs.create(s,d,u);s.commit();return x
 @app.post('/packs/{id}/recommend')
 def recommend(id:int,s=Depends(session),u=Depends(writer)):
-    p=lock(s,Pack,id)
-    if p.ml_state not in ('recorded','failed'):raise HTTPException(409,'只可估计新配套或失败重试')
-    p.ml_state='queued';p.error=None;s.commit()
-    try:q.rpush('book-baskets',id)
-    except Exception:p.ml_state='failed';p.error='队列不可用，恢复后可重新排队';s.commit();raise HTTPException(503,p.error)
-    return pack(p)
+    p,run,mode=analysis.start(s,id,u);s.commit()
+    try:worker.enqueue(run.id)
+    except Exception:raise HTTPException(503,'队列暂不可用，服务恢复后会自动续算')
+    return pack(p)|{'run':analysis.view(run),'mode':mode}
+@app.post('/packs/{id}/analysis/abandon')
+def abandon_analysis(id:int,d:AbandonInput,s=Depends(session),u=Depends(writer)):
+    p,run=analysis.abandon(s,id,d,u);s.commit();return pack(p)|{'run':analysis.view(run)}
+@app.get('/packs/{id}/analysis')
+def analysis_runs(id:int,s=Depends(session),u=Depends(current)):
+    if not s.get(Pack,id):raise HTTPException(404,'业务记录不存在')
+    p=s.get(Pack,id);runs=list(s.scalars(select(AnalysisRun).where(AnalysisRun.pack_id==id).order_by(AnalysisRun.attempt)))
+    return {'pack_id':id,'active_run_id':p.active_run_id,'runs':[analysis.detail(r)for r in runs]}
 @app.post('/packs/{id}/reserve')
 def reserve(id:int,s=Depends(session),u=Depends(supervisor)):
     x=packs.reserve(s,id,u);s.commit();return x

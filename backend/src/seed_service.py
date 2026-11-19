@@ -1,11 +1,23 @@
-from sqlalchemy import select,func
+from sqlalchemy import select,func,inspect,text
 import numpy as np
 from .db import Base,engine,Session
 from .models import *
 from .auth import hashed
 
+def ensure_columns():
+    """Additive upgrade for an existing demo volume: create_all only adds tables."""
+    wanted={'packs':{'active_run_id':'INTEGER NULL'},'analysis_runs':{'lease_expires_at':'DATETIME NULL','lease_token':'VARCHAR(40) NULL'}}
+    inspector=inspect(engine);tables=set(inspector.get_table_names())
+    with engine.begin()as c:
+        for table,columns in wanted.items():
+            if table not in tables:continue
+            existing={x['name']for x in inspector.get_columns(table)}
+            for column,ddl in columns.items():
+                if column not in existing:c.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} {ddl}'))
+
 def seed():
     Base.metadata.create_all(engine)
+    ensure_columns()
     with Session()as s:
         for role in ('operator','supervisor','viewer'):
             if not s.scalar(select(User.id).where(User.email==role+'@xunshu.demo')):s.add(User(email=role+'@xunshu.demo',password_hash=hashed('Books2026!'),role=role))

@@ -21,3 +21,4 @@ class DepositInput(BaseModel):amount_cents:int=Field(ge=100,le=1000000);receipt:
 class ReturnInput(BaseModel):condition:Literal['usable','repair'];damage_cents:int=Field(default=0,ge=0,le=100000);note:str=Field(min_length=4,max_length=250);receipt:str=Field(min_length=4,max_length=80)
 class LossInput(BaseModel):damage_cents:int=Field(ge=1,le=100000);note:str=Field(min_length=6,max_length=250);receipt:str=Field(min_length=4,max_length=80)
 class SettlementInput(BaseModel):receipt:str=Field(min_length=4,max_length=80)
+class AbandonInput(BaseModel):reason:str=Field(default='',max_length=300)

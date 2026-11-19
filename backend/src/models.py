@@ -1,6 +1,9 @@
-from sqlalchemy import Column,Integer,String,ForeignKey,JSON,UniqueConstraint,CheckConstraint
+from datetime import datetime,timezone
+from sqlalchemy import Column,Integer,String,ForeignKey,JSON,UniqueConstraint,CheckConstraint,DateTime
 from .db import Base
 from .constants import COPY_CONDITIONS,PACK_STATES,ASSIGNMENT_STATES
+
+def utcnow():return datetime.now(timezone.utc).replace(tzinfo=None)
 class User(Base):
     __tablename__='users'
     id=Column(Integer,primary_key=True);email=Column(String(100),unique=True,nullable=False);password_hash=Column(String(220),nullable=False);role=Column(String(30),nullable=False)
@@ -29,7 +32,11 @@ class Inspection(Base):
     id=Column(Integer,primary_key=True);copy_id=Column(Integer,ForeignKey('copies.id'),nullable=False);condition=Column(String(20),nullable=False);note=Column(String(250),nullable=False)
 class Pack(Base):
     __tablename__='packs'
-    id=Column(Integer,primary_key=True);code=Column(String(60),unique=True,nullable=False);classroom_id=Column(Integer,ForeignKey('classrooms.id'),nullable=False);term=Column(String(30),nullable=False);state=Column(String(20),default=PACK_STATES[0]);ml_state=Column(String(20),default='recorded');recommendation=Column(JSON);error=Column(String(450))
+    id=Column(Integer,primary_key=True);code=Column(String(60),unique=True,nullable=False);classroom_id=Column(Integer,ForeignKey('classrooms.id'),nullable=False);term=Column(String(30),nullable=False);state=Column(String(20),default=PACK_STATES[0]);ml_state=Column(String(20),default='recorded');recommendation=Column(JSON);error=Column(String(450));active_run_id=Column(Integer)
+class AnalysisRun(Base):
+    __tablename__='analysis_runs'
+    id=Column(Integer,primary_key=True);pack_id=Column(Integer,ForeignKey('packs.id'),nullable=False);attempt=Column(Integer,nullable=False);state=Column(String(20),default='queued');requested_by=Column(String(100));edition_snapshot=Column(JSON,nullable=False);basket_snapshot=Column(JSON,nullable=False);recommendation=Column(JSON);error=Column(String(450));created_at=Column(DateTime,default=utcnow);started_at=Column(DateTime);finished_at=Column(DateTime);lease_expires_at=Column(DateTime);lease_token=Column(String(40))
+    __table_args__=(UniqueConstraint('pack_id','attempt'),)
 class PackLine(Base):
     __tablename__='pack_lines'
     id=Column(Integer,primary_key=True);pack_id=Column(Integer,ForeignKey('packs.id'),nullable=False);edition_id=Column(Integer,ForeignKey('editions.id'),nullable=False);quantity=Column(Integer,nullable=False)
